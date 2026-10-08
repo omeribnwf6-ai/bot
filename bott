@@ -1,0 +1,79 @@
+import os
+from telegram import Update
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    ContextTypes, filters,
+)
+
+TOKEN = os.getenv("BOT_TOKEN", "ضع_التوكن_هنا")
+SAVE_DIR = "files"
+os.makedirs(SAVE_DIR, exist_ok=True)
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "أرسل لي أي ملف لأحفظه.\n"
+        "/list - عرض الملفات المحفوظة\n"
+        "/get اسم_الملف - تنزيل ملف"
+    )
+
+
+# رفع ملف إلى البوت (حفظه على السيرفر)
+async def receive_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    if msg.document:
+        tg_file = await msg.document.get_file()
+        name = msg.document.file_name
+    elif msg.photo:
+        tg_file = await msg.photo[-1].get_file()
+        name = f"{tg_file.file_unique_id}.jpg"
+    elif msg.video:
+        tg_file = await msg.video.get_file()
+        name = msg.video.file_name or f"{tg_file.file_unique_id}.mp4"
+    elif msg.audio:
+        tg_file = await msg.audio.get_file()
+        name = msg.audio.file_name or f"{tg_file.file_unique_id}.mp3"
+    else:
+        return
+
+    name = os.path.basename(name)  # حماية من مسارات خبيثة
+    await tg_file.download_to_drive(os.path.join(SAVE_DIR, name))
+    await msg.reply_text(f"تم حفظ الملف: {name}")
+
+
+async def list_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    files = os.listdir(SAVE_DIR)
+    if not files:
+        await update.message.reply_text("لا توجد ملفات.")
+        return
+    await update.message.reply_text("\n".join(files))
+
+
+# تنزيل ملف من البوت (إرساله لك)
+async def get_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("استخدم: /get اسم_الملف")
+        return
+    name = os.path.basename(" ".join(context.args))
+    path = os.path.join(SAVE_DIR, name)
+    if not os.path.isfile(path):
+        await update.message.reply_text("الملف غير موجود.")
+        return
+    with open(path, "rb") as f:
+        await update.message.reply_document(f, filename=name)
+
+
+def main():
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("list", list_files))
+    app.add_handler(CommandHandler("get", get_file))
+    app.add_handler(MessageHandler(
+        filters.Document.ALL | filters.PHOTO | filters.VIDEO | filters.AUDIO,
+        receive_file,
+    ))
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
